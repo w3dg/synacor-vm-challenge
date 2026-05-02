@@ -1,9 +1,11 @@
 package vm
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"log/slog"
+	"os"
 )
 
 const (
@@ -20,12 +22,15 @@ const (
 type Value uint16
 
 type VM struct {
-	isHalted  bool                  // Is the vm halted
-	memory    [UINT16_MAX_LEN]Value // 15 bit address space with 16 bit values (Value)
-	registers [8]Value              // 8 Registers with 16 bit values (Value)
-	stack     []Value               // Unbounded stack to store 16 bit values (Value)
-	sp        int                   // Stack pointer
-	ip        int                   // Instruction pointer, points to the start of the current instruction in VM.memory
+	isHalted    bool                  // Is the vm halted
+	memory      [UINT16_MAX_LEN]Value // 15 bit address space with 16 bit values (Value)
+	registers   [8]Value              // 8 Registers with 16 bit values (Value)
+	inputBuffer []byte                // Input Buffer for user input, read character from user
+	inputBufPos int                   // Index of how far the input buffer we've consumed, as program
+	// takes value one char at a time but we can buffer it safely
+	stack []Value // Unbounded stack to store 16 bit values (Value)
+	sp    int     // Stack pointer
+	ip    int     // Instruction pointer, points to the start of the current instruction in VM.memory
 }
 
 type ResolvedValue struct {
@@ -405,11 +410,32 @@ func (vm *VM) Step() bool {
 		fmt.Printf("%c", op1)
 		vm.ip += 2
 
-	// in: 20 a
-	// 	 read a character from the terminal and write its ascii code to <a>; it
-	//   can be assumed that once input starts, it will continue until a newline is
-	// 	  encountered; this means that you can safely read whole lines from the
-	// 	  keyboard instead   of having to figure out how to read individual characters
+	case 20:
+		// in: 20 a
+		// 	 read a character from the terminal and write its ascii code to <a>; it
+		//   can be assumed that once input starts, it will continue until a newline is
+		// 	  encountered; this means that you can safely read whole lines from the
+		// 	  keyboard instead   of having to figure out how to read individual characters
+
+		target := vm.memory[vm.ip+1]
+
+		if vm.inputBufPos == len(vm.inputBuffer) {
+			reader := bufio.NewReader(os.Stdin)
+			line, err := reader.ReadString('\n') // read upto the delimiter \n
+			if err != nil {
+				log.Fatal("Could not read line upto newline")
+			}
+			vm.inputBuffer = []byte(line)
+			vm.inputBufPos = 0
+		}
+
+		// write one byte at a time regardless of buffer resets
+		character := vm.inputBuffer[vm.inputBufPos]
+		vm.SaveValue(target, Value(character))
+		vm.inputBufPos++
+
+		vm.ip += 2
+
 	case 21:
 		// noop: 21
 		//   no operation
