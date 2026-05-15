@@ -22,15 +22,16 @@ const (
 type Value uint16
 
 type VM struct {
-	isHalted    bool                  // Is the vm halted
-	memory      [UINT16_MAX_LEN]Value // 15 bit address space with 16 bit values (Value)
-	registers   [8]Value              // 8 Registers with 16 bit values (Value)
-	inputBuffer []byte                // Input Buffer for user input, read character from user
-	inputBufPos int                   // Index of how far the input buffer we've consumed, as program
-	// takes value one char at a time but we can buffer it safely
-	stack []Value // Unbounded stack to store 16 bit values (Value)
-	sp    int     // Stack pointer
-	ip    int     // Instruction pointer, points to the start of the current instruction in VM.memory
+	isHalted      bool                  // Is the vm halted
+	memory        [UINT16_MAX_LEN]Value // 15 bit address space with 16 bit values (Value)
+	registers     [8]Value              // 8 Registers with 16 bit values (Value)
+	inputBuffer   []byte                // Input Buffer for user input, read character from user
+	inputBufPos   int                   // Index of how far the input buffer we've consumed till new line
+	reader        *bufio.Reader         // reader for taking commands from stdin
+	cmdHistWriter *CmdHistWriter        // to record history sessions for replaying later
+	stack         []Value               // Unbounded stack to store 16 bit values (Value)
+	sp            int                   // Stack pointer
+	ip            int                   // Instruction pointer, points to the start of the current instruction in VM.memory
 }
 
 type ResolvedValue struct {
@@ -68,9 +69,11 @@ func (vm *VM) SaveValue(destaddr, val Value) {
 
 func New() *VM {
 	return &VM{
-		isHalted: false, // let it start
-		sp:       -1,    // set stack pointer to -1, empty stack
-		ip:       0,     // set inst pointer to 0
+		isHalted:      false,                     // let it start
+		sp:            -1,                        // set stack pointer to -1, empty stack
+		ip:            0,                         // set inst pointer to 0
+		reader:        bufio.NewReader(os.Stdin), // setup a stdin reader once
+		cmdHistWriter: NewCmdHistWriter(),        // new command history writer for this running session
 	}
 }
 
@@ -419,14 +422,21 @@ func (vm *VM) Step() bool {
 
 		target := vm.memory[vm.ip+1]
 
+		const CLR_RED string = "\033[31m"
+		const CLR_RST string = "\033[0m"
+
 		if vm.inputBufPos == len(vm.inputBuffer) {
-			reader := bufio.NewReader(os.Stdin)
-			line, err := reader.ReadString('\n') // read upto the delimiter \n
+			line, err := vm.reader.ReadString('\n') // read upto the delimiter \n
 			if err != nil {
 				log.Fatal("Could not read line upto newline")
 			}
+			// print input back to retrace steps
+			fmt.Printf("%s%s%s", CLR_RED, line, CLR_RST)
 			vm.inputBuffer = []byte(line)
 			vm.inputBufPos = 0
+
+			// append to history file
+			vm.cmdHistWriter.AppendToFile(vm.inputBuffer)
 		}
 
 		// write one byte at a time regardless of buffer resets
